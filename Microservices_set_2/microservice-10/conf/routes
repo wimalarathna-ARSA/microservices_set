@@ -1,0 +1,4 @@
+GET     /       controllers.HomeController.index
+GET     /ping   controllers.HomeController.ping
+GET     /spike  controllers.HomeController.spike(duration: Option[Int])
+GET     /metrics controllers.HomeController.metrics
