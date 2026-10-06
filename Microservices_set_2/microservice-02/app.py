@@ -14,19 +14,50 @@ PLATFORM = os.environ.get('PLATFORM', 'render')
 
 incoming_requests = 0
 processing_requests = 0
+http_errors = 0
+request_timeouts = 0
+last_latency_ms = 0.0
+http_errors_per_sec = 0.0
+start_time = time.time()
+_last_error_count = 0
+
+import threading
+def _error_window():
+    global http_errors_per_sec, _last_error_count
+    while True:
+        http_errors_per_sec = http_errors - _last_error_count
+        _last_error_count = http_errors
+        time.sleep(1.0)
+threading.Thread(target=_error_window, daemon=True).start()
 
 @app.before_request
 def before_request():
     global incoming_requests
-    if request.path not in ['/ping', '/metrics']: # Optional: Exclude health routes from queue tracking? We'll include all to be consistent.
-        pass
     incoming_requests += 1
+    request._start_time = time.perf_counter()
 
 @app.after_request
 def after_request(response):
-    global processing_requests
+    global processing_requests, http_errors, last_latency_ms
     processing_requests += 1
+    if hasattr(request, '_start_time'):
+        last_latency_ms = round((time.perf_counter() - request._start_time) * 1000, 2)
+    if response.status_code >= 400:
+        http_errors += 1
     return response
+
+@app.route('/health')
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": SERVICE_NAME,
+        "service_id": SERVICE_NAME,
+        "target_reachable": True,
+        "health_check_failed": 0,
+        "latency_ms": last_latency_ms,
+        "target": "self",
+        "platform": PLATFORM,
+    })
 
 @app.route('/')
 def hello():
@@ -58,6 +89,13 @@ def metrics():
         "incoming_requests": incoming_requests,
         "processing_requests": processing_requests,
         "queue_length": queue_length,
+        "latency_ms": last_latency_ms,
+        "service_unreachable": 0,
+        "health_check_failed": 0,
+        "request_timeout": 1 if request_timeouts > 0 else 0,
+        "http_errors_per_sec": float(http_errors_per_sec),
+        "error_rate": round(http_errors_per_sec / max(incoming_requests, 1), 6),
+        "uptime_seconds": round(time.time() - start_time, 2),
         "measurement_method": "application_runtime",
         "cpu_allocation": f"{psutil.cpu_count()}vCPU"
     })

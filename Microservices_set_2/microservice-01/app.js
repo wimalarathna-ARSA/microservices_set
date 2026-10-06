@@ -7,13 +7,36 @@ const platform = process.env.PLATFORM || 'render';
 
 let incomingRequests = 0;
 let processingRequests = 0;
+let httpErrors = 0;
+let requestTimeouts = 0;
+let lastLatencyMs = 0.0;
+let lastHttpErrorWindow = 0;
+const startTime = Date.now();
+
+setInterval(() => { lastHttpErrorWindow = httpErrors; httpErrors = 0; }, 1000);
 
 app.use((req, res, next) => {
     incomingRequests++;
+    const reqStart = Date.now();
     res.on('finish', () => {
         processingRequests++;
+        lastLatencyMs = Date.now() - reqStart;
+        if (res.statusCode >= 400) httpErrors++;
     });
     next();
+});
+
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: serviceName,
+        platform: platform,
+        service_id: serviceName,
+        target_reachable: true,
+        health_check_failed: 0,
+        latency_ms: lastLatencyMs,
+        target: 'self'
+    });
 });
 
 app.get('/', (req, res) => {
@@ -64,6 +87,13 @@ app.get('/metrics', (req, res) => {
         incoming_requests: incomingRequests,
         processing_requests: processingRequests,
         queue_length: queueLength >= 0 ? queueLength : 0,
+        latency_ms: lastLatencyMs,
+        service_unreachable: 0,
+        health_check_failed: 0,
+        request_timeout: requestTimeouts > 0 ? 1 : 0,
+        http_errors_per_sec: lastHttpErrorWindow,
+        error_rate: incomingRequests > 0 ? parseFloat(((lastHttpErrorWindow) / Math.max(incomingRequests, 1)).toFixed(6)) : 0,
+        uptime_seconds: Math.round((Date.now() - startTime) / 1000 * 100) / 100,
         measurement_method: 'application_runtime',
         cpu_allocation: `${os.cpus().length}vCPU`
     });

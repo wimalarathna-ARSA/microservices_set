@@ -10,19 +10,49 @@ var platform = Environment.GetEnvironmentVariable("PLATFORM") ?? "render";
 
 long incomingRequests = 0;
 long processingRequests = 0;
+long httpErrors = 0;
+long httpErrorsWindow = 0;
+double lastLatencyMs = 0;
+var startTime = DateTime.UtcNow;
+
+_ = Task.Run(async () =>
+{
+    while (true)
+    {
+        await Task.Delay(1000);
+        Interlocked.Exchange(ref httpErrorsWindow, Interlocked.Read(ref httpErrors));
+        Interlocked.Exchange(ref httpErrors, 0);
+    }
+});
 
 app.Use(async (context, next) =>
 {
     Interlocked.Increment(ref incomingRequests);
+    var sw = Stopwatch.StartNew();
     try
     {
         await next();
     }
     finally
     {
+        sw.Stop();
+        lastLatencyMs = sw.Elapsed.TotalMilliseconds;
         Interlocked.Increment(ref processingRequests);
+        if (context.Response.StatusCode >= 400) Interlocked.Increment(ref httpErrors);
     }
 });
+
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "ok",
+    service = serviceName,
+    service_id = serviceName,
+    platform = platform,
+    target_reachable = true,
+    health_check_failed = 0,
+    latency_ms = lastLatencyMs,
+    target = "self"
+}));
 
 app.MapGet("/", () => "Hello from Microservice 07 (C# ASP.NET Core)");
 
@@ -54,6 +84,13 @@ app.MapGet("/metrics", () =>
         incoming_requests = inc,
         processing_requests = proc,
         queue_length = queue,
+        latency_ms = Math.Round(lastLatencyMs, 2),
+        service_unreachable = 0,
+        health_check_failed = 0,
+        request_timeout = 0,
+        http_errors_per_sec = Interlocked.Read(ref httpErrors),
+        error_rate = inc > 0 ? Math.Round((double)Interlocked.Read(ref httpErrors) / inc, 6) : 0.0,
+        uptime_seconds = Math.Round((DateTime.UtcNow - startTime).TotalSeconds, 2),
         measurement_method = "application_runtime",
         cpu_allocation = $"{Environment.ProcessorCount}vCPU"
     });

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -20,8 +21,24 @@ import (
 var (
 	incomingRequests   int64
 	processingRequests int64
+	httpErrors         int64
+	httpErrorsWindow   int64
+	lastLatencyMs      float64
+	muLatency          sync.RWMutex
 	startTime          time.Time
 )
+
+func setLastLatency(ms float64) {
+	muLatency.Lock()
+	lastLatencyMs = ms
+	muLatency.Unlock()
+}
+
+func getLastLatency() float64 {
+	muLatency.RLock()
+	defer muLatency.RUnlock()
+	return lastLatencyMs
+}
 
 func main() {
 	startTime = time.Now()
@@ -49,9 +66,23 @@ func main() {
 
 	r.Use(func(c *gin.Context) {
 		atomic.AddInt64(&incomingRequests, 1)
-		defer atomic.AddInt64(&processingRequests, 1)
+		start := time.Now()
+		defer func() {
+			atomic.AddInt64(&processingRequests, 1)
+			setLastLatency(float64(time.Since(start).Microseconds()) / 1000.0)
+			if c.Writer.Status() >= 400 {
+				atomic.AddInt64(&httpErrors, 1)
+			}
+		}()
 		c.Next()
 	})
+
+	go func() {
+		for range time.Tick(1 * time.Second) {
+			n := atomic.SwapInt64(&httpErrors, 0)
+			atomic.StoreInt64(&httpErrorsWindow, n)
+		}
+	}()
 
 	r.GET("/", func(c *gin.Context) {
 		c.String(http.StatusOK, "Hello from Microservice 04 (Go Gin) - Deployed on Render")
@@ -59,11 +90,16 @@ func main() {
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"status":    "healthy",
-			"service":   serviceName,
-			"platform":  platform,
-			"uptime":    time.Since(startTime).String(),
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"status":              "healthy",
+			"service":             serviceName,
+			"service_id":          serviceName,
+			"platform":            platform,
+			"uptime":              time.Since(startTime).String(),
+			"timestamp":           time.Now().UTC().Format(time.RFC3339),
+			"target_reachable":    true,
+			"health_check_failed": 0,
+			"latency_ms":          math.Round(getLastLatency()*100) / 100,
+			"target":              "self",
 		})
 	})
 
@@ -117,9 +153,21 @@ func main() {
 			"incoming_requests":   inc,
 			"processing_requests": proc,
 			"queue_length":        queue,
-			"measurement_method":  "application_runtime",
-			"cpu_allocation":      fmt.Sprintf("%dvCPU", numCPU),
-			"goroutines":          numGoroutine,
+			"latency_ms":          math.Round(getLastLatency()*100) / 100,
+			"service_unreachable": 0,
+			"health_check_failed": 0,
+			"request_timeout":     0,
+			"http_errors_per_sec": atomic.LoadInt64(&httpErrorsWindow),
+			"error_rate": func() float64 {
+				if inc > 0 {
+					return math.Round(float64(atomic.LoadInt64(&httpErrorsWindow))/float64(inc)*1000000) / 1000000
+				}
+				return 0.0
+			}(),
+			"uptime_seconds":     math.Round(time.Since(startTime).Seconds()*100) / 100,
+			"measurement_method": "application_runtime",
+			"cpu_allocation":     fmt.Sprintf("%dvCPU", numCPU),
+			"goroutines":         numGoroutine,
 		})
 	})
 

@@ -17,14 +17,32 @@ class Microservice05 < Sinatra::Base
 
   $incoming_requests = 0
   $processing_requests = 0
+  $http_errors = 0
+  $http_errors_window = 0
+  $last_latency_ms = 0.0
   $lock = Mutex.new
 
   before do
     $lock.synchronize { $incoming_requests += 1 }
+    env['start_time'] = Time.now.to_f
   end
 
   after do
-    $lock.synchronize { $processing_requests += 1 }
+    $lock.synchronize do
+      $processing_requests += 1
+      $last_latency_ms = ((Time.now.to_f - env['start_time'].to_f) * 1000).round(2)
+      $http_errors += 1 if response.status >= 400
+    end
+  end
+
+  Thread.new do
+    loop do
+      sleep 1
+      $lock.synchronize do
+        $http_errors_window = $http_errors
+        $http_errors = 0
+      end
+    end
   end
 
   get '/' do
@@ -36,9 +54,14 @@ class Microservice05 < Sinatra::Base
     {
       status: 'healthy',
       service: SERVICE_NAME,
+      service_id: SERVICE_NAME,
       platform: PLATFORM,
       uptime: format_uptime(Time.now.utc - START_TIME),
-      timestamp: Time.now.utc.iso8601
+      timestamp: Time.now.utc.iso8601,
+      target_reachable: true,
+      health_check_failed: 0,
+      latency_ms: $last_latency_ms,
+      target: 'self'
     }.to_json
   end
 
@@ -99,7 +122,14 @@ class Microservice05 < Sinatra::Base
       queue_length: queue,
       measurement_method: 'application_runtime',
       cpu_allocation: "#{cpu_count}vCPU",
-      threads: Thread.list.size
+      threads: Thread.list.size,
+      latency_ms: $last_latency_ms,
+      service_unreachable: 0,
+      health_check_failed: 0,
+      request_timeout: 0,
+      http_errors_per_sec: $http_errors_window,
+      error_rate: inc > 0 ? ($http_errors_window.to_f / inc).round(6) : 0.0,
+      uptime_seconds: (Time.now.utc - START_TIME).round(2)
     }.to_json
   end
 
