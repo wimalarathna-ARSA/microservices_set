@@ -56,25 +56,52 @@ app.get('/spike', (req, res) => {
     res.json({ message: `CPU spiked for ${duration} seconds`, service: serviceName });
 });
 
-let lastCpuUsage = process.cpuUsage();
-let lastCpuTime = process.hrtime.bigint();
+let lastProcUsage = process.cpuUsage();
+let lastProcHrtime = process.hrtime.bigint();
+let lastProcPercent = 0.0;
+let lastProcAt = Date.now();
+let lastSysIdle = null;
+let lastSysTotal = null;
 let currentCpuPercent = 0.0;
 
+const fs = require('fs');
+
+function readProcStatCpu() {
+  try {
+    const line = fs.readFileSync('/proc/stat', 'ascii').split('\n')[0];
+    const parts = line.trim().split(/\s+/).slice(1).map(Number);
+    const idle = parts[3] + (parts[4] || 0);
+    const total = parts.reduce((a, b) => a + b, 0);
+    return { idle, total };
+  } catch (e) {
+    return null;
+  }
+}
+
 setInterval(() => {
-    const currentCpuUsage = process.cpuUsage();
-    const currentCpuTime = process.hrtime.bigint();
-    
-    const userDiff = currentCpuUsage.user - lastCpuUsage.user;
-    const systemDiff = currentCpuUsage.system - lastCpuUsage.system;
-    
-    const timeDiff = Number(currentCpuTime - lastCpuTime) / 1000;
-    if (timeDiff > 0) {
-        const cpuPercent = ((userDiff + systemDiff) / timeDiff) * 100;
-        currentCpuPercent = Math.min(100, cpuPercent / os.cpus().length);
+  // Primary: system-wide CPU% from /proc/stat (matches psutil.cpu_percent on Linux)
+  const s = readProcStatCpu();
+  if (s && lastSysIdle !== null) {
+    const idleDiff = s.idle - lastSysIdle;
+    const totalDiff = s.total - lastSysTotal;
+    if (totalDiff > 0) {
+      currentCpuPercent = Math.min(100, Math.max(0, (1 - idleDiff / totalDiff) * 100));
     }
-    
-    lastCpuUsage = currentCpuUsage;
-    lastCpuTime = currentCpuTime;
+  }
+  if (s) { lastSysIdle = s.idle; lastSysTotal = s.total; }
+  else {
+    // Fallback: this process's CPU over the interval
+    const now = Date.now();
+    const u = process.cpuUsage();
+    const h = process.hrtime.bigint();
+    const cpuMicros = (u.user - lastProcUsage.user) + (u.system - lastProcUsage.system);
+    const wallMicros = Number(h - lastProcHrtime) / 1000;
+    if (wallMicros > 0) {
+      lastProcPercent = Math.min(100, (cpuMicros / wallMicros) * 100);
+      currentCpuPercent = lastProcPercent;
+    }
+    lastProcUsage = u; lastProcHrtime = h; lastProcAt = now;
+  }
 }, 1000);
 
 app.get('/metrics', (req, res) => {
