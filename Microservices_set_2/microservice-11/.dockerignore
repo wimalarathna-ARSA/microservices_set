@@ -1,0 +1,10 @@
+target
+build
+.gradle
+project/target
+project/project
+_build
+deps
+*.class
+.idea
+.vscode
