@@ -3,4 +3,4 @@ WORKDIR /app
 RUN cpan Mojolicious
 COPY . .
 EXPOSE 3018
-CMD ["perl", "app.pl", "daemon", "-l", "http://*:3018"]
+CMD perl app.pl daemon -l http://*:${PORT:-3018}
