@@ -7,9 +7,9 @@ var processing = 0
 var errors = 0
 var lastLatency = 0.0
 
-app.server.configuration.hostname = "0.0.0.0"
+app.http.server.configuration.hostname = "0.0.0.0"
 if let p = Environment.get("PORT"), let port = Int(p) {
-    app.server.configuration.port = port
+    app.http.server.configuration.port = port
 }
 
 defer { app.shutdown() }
@@ -58,9 +58,8 @@ app.get("spike") { req -> Response in
     let t0 = Date()
     let duration = req.query["duration"] as Int? ?? 10
     let end = Date().addingTimeInterval(TimeInterval(duration))
-    var x = 0.0
     while Date() < end {
-        x = sqrt(pow(64.0, 5.0))
+        _ = sqrt(pow(64.0, 5.0))
     }
     let body = "{\"message\":\"CPU spiked for \(duration) seconds\",\"service\":\"service-swift-20\"}"
     let res = Response(status: .ok, headers: ["Content-Type": "application/json"], body: .init(string: body))
