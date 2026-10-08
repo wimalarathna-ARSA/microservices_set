@@ -1,4 +1,4 @@
-FROM rust:1.85-slim
+FROM rust:1-slim
 WORKDIR /app
 COPY Cargo.toml ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs

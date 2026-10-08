@@ -20,7 +20,9 @@ defmodule Microservice11.MixProject do
 
   defp deps do
     [
-      {:plug_cowboy, "~> 2.5"}
+      {:plug, "~> 1.14.0"},
+      {:plug_cowboy, "~> 2.5.2"},
+      {:cowlib, "~> 2.11.0", override: true}
     ]
   end
 end
