@@ -1,4 +1,5 @@
 (ns microservice-12.core
+  (:gen-class)
   (:require [ring.adapter.jetty :refer [run-jetty]]
             [clojure.string :as str]))
 
@@ -56,6 +57,6 @@
       (when (>= (:status response) 400) (swap! counters update :err inc))
       response)))
 
-(defn -main []
+(defn -main [& args]
   (let [port (Integer/parseInt (or (get (System/getenv) "PORT") "3012"))]
     (run-jetty handler {:port port})))

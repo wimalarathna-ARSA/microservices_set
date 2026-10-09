@@ -2,4 +2,5 @@
   :dependencies [[org.clojure/clojure "1.11.1"]
                  [ring/ring-core "1.9.5"]
                  [ring/ring-jetty-adapter "1.9.5"]]
-  :main microservice-12.core)
+  :main microservice-12.core
+  :aot [microservice-12.core])
