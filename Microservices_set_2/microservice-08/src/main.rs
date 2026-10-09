@@ -1,4 +1,9 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder, HttpRequest, middleware::{self, Next}, body::BoxBody, HttpMessage};
+use actix_web::{
+    body::BoxBody,
+    dev::{ServiceRequest, ServiceResponse},
+    middleware::{self, Next},
+    web, App, HttpResponse, HttpServer, Responder,
+};
 use serde::Serialize;
 use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +16,10 @@ static HTTP_ERRORS: AtomicU64 = AtomicU64::new(0);
 static LAST_LATENCY_MS: Mutex<f64> = Mutex::new(0.0);
 static START: Mutex<Option<Instant>> = Mutex::new(None);
 
-async fn metrics_mw(req: HttpRequest, next: Next<BoxBody>) -> Result<HttpResponse<BoxBody>, actix_web::Error> {
+async fn metrics_mw(
+    req: ServiceRequest,
+    next: Next<BoxBody>,
+) -> Result<ServiceResponse<BoxBody>, actix_web::Error> {
     INCOMING.fetch_add(1, Ordering::SeqCst);
     let start = Instant::now();
     let res = next.call(req).await?;
@@ -30,6 +38,7 @@ async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
         "status": "ok",
         "service": env::var("SERVICE_NAME").unwrap_or_else(|_| "service-rust-08".to_string()),
+        "platform": env::var("PLATFORM").unwrap_or_else(|_| "azure".to_string()),
         "target_reachable": true,
         "health_check_failed": 0,
         "latency_ms": latency,
